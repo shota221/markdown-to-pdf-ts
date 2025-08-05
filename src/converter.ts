@@ -1,10 +1,11 @@
 import { marked } from 'marked';
 import { markedHighlight } from 'marked-highlight';
+import { gfmHeadingId } from 'marked-gfm-heading-id';
 import hljs from 'highlight.js';
 import puppeteer from 'puppeteer';
 import fs from 'fs/promises';
 import path from 'path';
-import { FontSize, FontSizeConfig, FontSizeConfigs } from './types';
+import { FontSize, FontSizeConfig, FontSizeConfigs } from './types.js';
 
 export class MarkdownToPDFConverter {
   private fontSize: FontSize;
@@ -13,14 +14,17 @@ export class MarkdownToPDFConverter {
   constructor(fontSize: FontSize = 'medium') {
     this.fontSize = fontSize;
     
-    // Configure marked with syntax highlighting
-    marked.use(markedHighlight({
-      langPrefix: 'hljs language-',
-      highlight(code, lang) {
-        const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-        return hljs.highlight(code, { language }).value;
-      }
-    }));
+    // Configure marked with syntax highlighting and heading IDs
+    marked.use(
+      markedHighlight({
+        langPrefix: 'hljs language-',
+        highlight(code, lang) {
+          const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+          return hljs.highlight(code, { language }).value;
+        }
+      }),
+      gfmHeadingId()
+    );
 
     marked.setOptions({
       breaks: true,
@@ -194,14 +198,79 @@ export class MarkdownToPDFConverter {
       .hljs-addition { background: #dfd; }
       .hljs-emphasis { font-style: italic; }
       .hljs-strong { font-weight: bold; }
+      
+      /* TOC (Table of Contents) スタイル */
+      .toc {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        padding: 1.5em;
+        margin: 2em 0;
+        page-break-inside: avoid;
+      }
+      
+      .toc h2 {
+        margin-top: 0;
+        margin-bottom: 1em;
+        color: #495057;
+        border-bottom: 2px solid #dee2e6;
+        padding-bottom: 0.5em;
+      }
+      
+      .toc ul {
+        margin: 0;
+        padding-left: 1.5em;
+      }
+      
+      .toc li {
+        margin-bottom: 0.3em;
+        line-height: 1.4;
+      }
+      
+      .toc a {
+        color: #007bff;
+        text-decoration: none;
+        display: block;
+        padding: 0.2em 0;
+      }
+      
+      .toc a:hover {
+        color: #0056b3;
+        text-decoration: underline;
+      }
+      
+      /* HTML要素のスタイル - シンプルなdetails展開 */
+      details {
+        display: block !important;
+        margin: 1em 0;
+      }
+      
+      details summary {
+        display: block !important;
+        list-style: none !important;
+        font-weight: bold;
+        margin-bottom: 0.5em;
+      }
+      
+      details summary::-webkit-details-marker {
+        display: none !important;
+      }
+      
+      /* すべてのdetails要素の内容を表示 */
+      details > :not(summary) {
+        display: block !important;
+      }
     `;
   }
 
-  private convertMarkdownToHtml(markdownContent: string): string {
-    // ネストしたコードブロックの前処理
-    const processedContent = this.preprocessNestedCodeblocks(markdownContent);
+  private async convertMarkdownToHtml(markdownContent: string): Promise<string> {
+    // TOC処理を先に実行
+    const contentWithToc = this.processTOC(markdownContent);
     
-    let htmlContent = marked(processedContent);
+    // ネストしたコードブロックの前処理
+    const processedContent = this.preprocessNestedCodeblocks(contentWithToc);
+    
+    let htmlContent = await marked(processedContent);
     
     // ネストしたコードブロックの後処理
     htmlContent = this.postprocessNestedCodeblocks(htmlContent);
@@ -220,6 +289,12 @@ export class MarkdownToPDFConverter {
       '<ul class="task-list">$1'
     );
     
+    // details要素を常に展開状態にする
+    htmlContent = htmlContent.replace(
+      /<details(?![^>]*\sopen)([^>]*)>/g,
+      '<details open$1>'
+    );
+    
     return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -232,6 +307,48 @@ export class MarkdownToPDFConverter {
     ${htmlContent}
 </body>
 </html>`;
+  }
+
+  private processTOC(markdownContent: string): string {
+    // [TOC]の位置を検索
+    const tocRegex = /^\[TOC\]$/gm;
+    const tocMatch = tocRegex.exec(markdownContent);
+    
+    if (!tocMatch) {
+      return markdownContent; // TOCがない場合はそのまま返す
+    }
+    
+    // 見出しを抽出
+    const headingRegex = /^(#{1,6})\s+(.+)$/gm;
+    const headings: Array<{level: number, text: string, id: string}> = [];
+    let match;
+    
+    while ((match = headingRegex.exec(markdownContent)) !== null) {
+      const level = match[1].length;
+      const text = match[2].trim();
+      // ID生成（日本語にも対応）
+      const id = text
+        .toLowerCase()
+        .replace(/[^\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\s-]/g, '') // 日本語文字、英数字、ハイフン、スペースのみ残す
+        .replace(/\s+/g, '-') // スペースをハイフンに
+        .replace(/-+/g, '-') // 連続するハイフンを1つに
+        .replace(/^-|-$/g, ''); // 先頭末尾のハイフンを削除
+      
+      headings.push({level, text, id: id || `heading-${headings.length}`});
+    }
+    
+    // TOC HTML生成
+    let tocHtml = '\n<div class="toc">\n\n## 目次\n\n';
+    for (const heading of headings) {
+      if (heading.level === 1) continue; // H1は目次に含めない（通常はタイトル）
+      
+      const indent = '  '.repeat(heading.level - 2); // H2から開始するので-2
+      tocHtml += `${indent}- [${heading.text}](#${heading.id})\n`;
+    }
+    tocHtml += '\n</div>\n\n';
+    
+    // [TOC]をTOCで置換
+    return markdownContent.replace(tocRegex, tocHtml);
   }
 
   private preprocessNestedCodeblocks(markdownContent: string): string {
@@ -413,7 +530,7 @@ export class MarkdownToPDFConverter {
     }
     
     const markdownContent = await fs.readFile(inputFile, 'utf-8');
-    let htmlContent = this.convertMarkdownToHtml(markdownContent);
+    let htmlContent = await this.convertMarkdownToHtml(markdownContent);
     
     // DEBUG_HTML環境変数が設定されている場合、HTMLをファイルに出力
     if (process.env.DEBUG_HTML) {
@@ -511,7 +628,7 @@ export class MarkdownToPDFConverter {
     }
     
     const mergedMarkdown = combinedContent.join('');
-    let htmlContent = this.convertMarkdownToHtml(mergedMarkdown);
+    let htmlContent = await this.convertMarkdownToHtml(mergedMarkdown);
     
     // 画像をBase64エンコードして埋め込み（最初のファイルのディレクトリを基準とする）
     const baseDir = path.dirname(path.resolve(inputFiles[0]));

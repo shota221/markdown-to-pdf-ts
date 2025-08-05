@@ -3,8 +3,8 @@
 import { Command } from 'commander';
 import { glob } from 'glob';
 import path from 'path';
-import { MarkdownToPDFConverter } from './converter';
-import { FontSize } from './types';
+import { MarkdownToPDFConverter } from './converter.js';
+import { FontSize } from './types.js';
 
 const program = new Command();
 

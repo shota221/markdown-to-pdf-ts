@@ -2,6 +2,7 @@
   "name": "markdown-to-pdf-ts",
   "version": "1.0.0",
   "description": "TypeScript implementation of Markdown to PDF converter",
+  "type": "module",
   "main": "dist/index.js",
   "bin": {
     "markdown-to-pdf-ts": "dist/index.js"
@@ -22,11 +23,12 @@
   "license": "MIT",
   "dependencies": {
     "commander": "^11.1.0",
-    "marked": "^9.1.6",
-    "marked-highlight": "^2.0.6",
-    "puppeteer": "^22.15.0",
+    "glob": "^10.3.10",
     "highlight.js": "^11.9.0",
-    "glob": "^10.3.10"
+    "marked": "^16.1.2",
+    "marked-gfm-heading-id": "^4.1.2",
+    "marked-highlight": "^2.0.6",
+    "puppeteer": "^22.15.0"
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
